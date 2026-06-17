@@ -469,7 +469,7 @@ async function printBanner(opts) {
   const innerW = cols - 2;
   console.log();
   console.log(chalk.dim('╭' + '─'.repeat(innerW) + '╮'));
-  await shimmerText('ai-cli', {
+  await shimmerText('vexra', {
     prefix: chalk.dim('│') + '  ',
     suffix: chalk.dim(' - TUI AI Assistant'),
   });
@@ -492,7 +492,7 @@ async function printBanner(opts) {
 
 async function runProviderSetup(opts) {
   console.log();
-  await typewriter('Welcome to ai-cli!', { color: [54, 208, 208], bold: true, intervalMs: 30 });
+  await typewriter('Welcome to vexra!', { color: [54, 208, 208], bold: true, intervalMs: 30 });
   console.log(chalk.dim("  Let's set up your AI provider.\n"));
 
   const providerId = await p.select({
@@ -1323,7 +1323,7 @@ export async function start(userOpts = {}) {
 
           console.log(chalk.dim('  9. Typewriter:'));
           process.stdout.write('  ');
-          await typewriter('Hello from ai-cli!', { color: [54, 208, 208], bold: true, intervalMs: 40 });
+          await typewriter('Hello from vexra!', { color: [54, 208, 208], bold: true, intervalMs: 40 });
 
           console.log(chalk.dim('  10. Fade Transition:'));
           process.stdout.write('  ');
