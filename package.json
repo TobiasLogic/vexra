@@ -1,0 +1,30 @@
+{
+  "name": "vexra",
+  "version": "1.0.0",
+  "description": "Vexra - The all-seeing CLI.",
+  "type": "module",
+  "bin": {
+    "vexra": "./cli.js"
+  },
+  "scripts": {
+    "start": "node cli.js",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "acorn": "^8.17.0",
+    "boxen": "^8.0.1",
+    "chalk": "^5.4.1",
+    "cheerio": "^1.2.0",
+    "cli-highlight": "^2.1.11",
+    "commander": "^13.1.0",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}
