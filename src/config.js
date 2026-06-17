@@ -15,7 +15,7 @@ const DEFAULTS = {
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'openai/gpt-4o',
   temperature: 0.7,
-  maxTokens: 4096,
+  maxTokens: 128000,
   referer: 'https://github.com/openchat/ai-cli',
   title: 'ai-cli',
 };
