@@ -1,4 +1,4 @@
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 
 const DANGEROUS_PATTERNS = [
   { re: /\brm\b(?=[^|;&\n]*\s-[a-z]*r)(?=[^|;&\n]*\s-[a-z]*f)/i, msg: 'recursive force delete (rm -r -f)' },
@@ -64,20 +64,38 @@ export function runCommand(cmd, opts = {}) {
   });
 }
 
+export function runCommandArgs(file, args = [], opts = {}) {
+  const {
+    timeout = 30000,
+    cwd = process.cwd(),
+    maxBuffer = 10 * 1024 * 1024,
+  } = opts;
+
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout, cwd, maxBuffer, env: sanitizedEnv() }, (error, stdout, stderr) => {
+      if (error && error.code === 'ENOENT') {
+        reject(error);
+        return;
+      }
+      resolve({
+        stdout: (stdout || '').trim(),
+        stderr: (stderr || '').trim(),
+        exitCode: typeof error?.code === 'number' ? error.code : 0,
+        signal: error?.signal || null,
+        killedByTimeout: error?.killed || false,
+      });
+    });
+  });
+}
+
 export const BACKGROUND_TASKS = new Map();
 let nextTaskId = 1;
 
-export function spawnBackgroundTask(cmd, opts = {}) {
+function registerTask(child, label) {
   const id = `task-${nextTaskId++}`;
-  const child = spawn(cmd, {
-    shell: true,
-    cwd: opts.cwd || process.cwd(),
-    env: sanitizedEnv(),
-  });
-
   const task = {
     id,
-    cmd,
+    cmd: label,
     pid: child.pid,
     startTime: new Date(),
     status: 'running',
@@ -100,7 +118,7 @@ export function spawnBackgroundTask(cmd, opts = {}) {
     task.status = 'finished';
     task.exitCode = code;
   });
-  
+
   child.on('error', (err) => {
     task.status = 'error';
     task.stderr += `\n[Error spawning task]: ${err.message}`;
@@ -108,4 +126,22 @@ export function spawnBackgroundTask(cmd, opts = {}) {
 
   BACKGROUND_TASKS.set(id, task);
   return id;
+}
+
+export function spawnBackgroundTask(cmd, opts = {}) {
+  const child = spawn(cmd, {
+    shell: true,
+    cwd: opts.cwd || process.cwd(),
+    env: sanitizedEnv(),
+  });
+  return registerTask(child, cmd);
+}
+
+export function spawnBackgroundTaskArgs(file, args = [], opts = {}) {
+  const child = spawn(file, args, {
+    shell: false,
+    cwd: opts.cwd || process.cwd(),
+    env: sanitizedEnv(),
+  });
+  return registerTask(child, [file, ...args].join(' '));
 }

@@ -91,6 +91,19 @@ export function parseSSELine(line) {
   }
 }
 
+function withCacheControl(msg) {
+  const clone = { ...msg };
+  if (typeof clone.content === 'string') {
+    clone.content = [{ type: 'text', text: clone.content, cache_control: { type: 'ephemeral' } }];
+  } else if (Array.isArray(clone.content) && clone.content.length > 0) {
+    const last = clone.content.length - 1;
+    clone.content = clone.content.map((block, i) =>
+      i === last ? { ...block, cache_control: { type: 'ephemeral' } } : block
+    );
+  }
+  return clone;
+}
+
 export async function* streamChat(messages, opts = {}) {
   const {
     apiKey,
@@ -125,36 +138,16 @@ export async function* streamChat(messages, opts = {}) {
     }
   };
 
-  // Add explicit caching for Anthropic models via OpenRouter
-  // We apply cache_control to the system prompt and the second-to-last message (to cache the chat history).
   if (messages.length > 0) {
-    // Clone messages to avoid mutating the caller's array
     body.messages = messages.map(msg => ({ ...msg }));
-    
-    // 1. Cache the system message (usually contains large instructions/context)
+
     if (body.messages[0].role === 'system') {
-      if (typeof body.messages[0].content === 'string') {
-        body.messages[0].content = [
-          { type: 'text', text: body.messages[0].content, cache_control: { type: 'ephemeral' } }
-        ];
-      } else if (Array.isArray(body.messages[0].content)) {
-        const lastBlock = body.messages[0].content[body.messages[0].content.length - 1];
-        if (lastBlock) lastBlock.cache_control = { type: 'ephemeral' };
-      }
+      body.messages[0] = withCacheControl(body.messages[0]);
     }
 
-    // 2. Cache the history right before the latest turn (if there are enough messages)
     const lastCacheableIndex = body.messages.length - 3;
     if (lastCacheableIndex > 0) {
-      const msg = body.messages[lastCacheableIndex];
-      if (typeof msg.content === 'string') {
-        msg.content = [
-          { type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } }
-        ];
-      } else if (Array.isArray(msg.content)) {
-        const lastBlock = msg.content[msg.content.length - 1];
-        if (lastBlock) lastBlock.cache_control = { type: 'ephemeral' };
-      }
+      body.messages[lastCacheableIndex] = withCacheControl(body.messages[lastCacheableIndex]);
     }
   }
 

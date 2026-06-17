@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
-import { resolve, relative, join } from 'path';
-import { runCommand, spawnBackgroundTask, BACKGROUND_TASKS } from './executor.js';
+import { resolve, relative, join, sep } from 'path';
+import { fileURLToPath } from 'url';
+import { runCommand, runCommandArgs, spawnBackgroundTask, spawnBackgroundTaskArgs, BACKGROUND_TASKS } from './executor.js';
+import { invalidateCodeMap } from './codemap.js';
 import * as p from '@clack/prompts';
 
 const MAX_READ_SIZE = 100 * 1024;
@@ -243,6 +245,11 @@ function resolvePath(p) {
   return resolve(process.cwd(), p);
 }
 
+function isInsideCwd(fullPath) {
+  const root = resolve(process.cwd());
+  return fullPath === root || fullPath.startsWith(root + sep);
+}
+
 function truncateOutput(text, maxLen = MAX_OUTPUT_SIZE) {
   if (text.length <= maxLen) return text;
   const startLen = Math.floor(maxLen * 0.2);
@@ -262,6 +269,9 @@ async function checkSyntax(fullPath) {
 
 async function execReadFile(args) {
   const fullPath = resolvePath(args.path);
+  if (!isInsideCwd(fullPath)) {
+    return { error: `Refusing to read outside the project directory: ${args.path}. Use run_shell if you really need this.` };
+  }
   if (!existsSync(fullPath)) return { error: `File not found: ${args.path}` };
   try {
     const stat = statSync(fullPath);
@@ -279,6 +289,7 @@ async function execWriteFile(args) {
   const fullPath = resolvePath(args.path);
   try {
     writeFileSync(fullPath, args.content, 'utf-8');
+    invalidateCodeMap();
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
     return { success: true, path: args.path, bytes: args.content.length };
@@ -301,6 +312,7 @@ async function execEditFile(args) {
     if (newLines[newLines.length - 1] === '') newLines.pop();
     lines.splice(start, end - start, ...newLines);
     writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+    invalidateCodeMap();
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
     return { success: true, path: args.path, linesReplaced: end - start, linesAdded: newLines.length };
@@ -336,9 +348,10 @@ async function execMultiEditFile(args) {
     }
 
     writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+    invalidateCodeMap();
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
-    
+
     return { success: true, path: args.path, editsApplied: sortedEdits.length, linesReplaced: totalLinesReplaced, linesAdded: totalLinesAdded };
   } catch (err) {
     return { error: `Failed to multi-edit ${args.path}: ${err.message}` };
@@ -347,6 +360,9 @@ async function execMultiEditFile(args) {
 
 async function execListDir(args) {
   const dirPath = resolvePath(args.path || '.');
+  if (!isInsideCwd(dirPath)) {
+    return { error: `Refusing to list outside the project directory: ${args.path || '.'}. Use run_shell if you really need this.` };
+  }
   if (!existsSync(dirPath)) return { error: `Directory not found: ${args.path || '.'}` };
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true });
@@ -363,6 +379,7 @@ async function execListDir(args) {
 async function execRunShell(args) {
   try {
     const result = await runCommand(args.command);
+    invalidateCodeMap();
     let output = '';
     if (result.stdout) output += result.stdout;
     if (result.stderr) output += (output ? '\n' : '') + `[stderr] ${result.stderr}`;
@@ -421,11 +438,8 @@ async function execManageTask(args) {
 
 async function execInvokeSubagent(args) {
   try {
-    const cliPath = resolvePath('cli.js');
-    // Escape quotes properly for shell
-    const safePrompt = args.prompt.replace(/"/g, '\\"');
-    const cmd = `node "${cliPath}" --headless "${safePrompt}"`;
-    const id = spawnBackgroundTask(cmd);
+    const cliPath = fileURLToPath(new URL('../cli.js', import.meta.url));
+    const id = spawnBackgroundTaskArgs('node', [cliPath, '--headless', args.prompt]);
     return { success: true, conversation_id: id, message: `Subagent spawned as task ${id}. Use manage_task status to check its output.` };
   } catch (err) {
     return { error: `Failed to invoke subagent: ${err.message}` };
@@ -480,14 +494,68 @@ async function execAskQuestion(args) {
   }
 }
 
+function isBlockedHost(hostname) {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === '::1' || host === '0.0.0.0') return true;
+  if (host === 'metadata.google.internal') return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (/^(fc|fd)[0-9a-f]{2}:/.test(host)) return true;
+  if (/^fe80:/.test(host)) return true;
+  return false;
+}
+
+async function fetchFollow(startUrl, headers, maxHops = 5) {
+  let url = startUrl;
+  for (let hop = 0; hop < maxHops; hop++) {
+    if (isBlockedHost(url.hostname)) {
+      const e = new Error('refusing to fetch a private, loopback, or link-local address');
+      e.blocked = true;
+      throw e;
+    }
+    const res = await fetch(url, { headers, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return res;
+      url = new URL(loc, url);
+      continue;
+    }
+    return res;
+  }
+  throw new Error('too many redirects');
+}
+
 async function execWebFetch(args) {
+  let url;
   try {
-    const res = await fetch(`https://r.jina.ai/${args.url}`, {
-      headers: { 'User-Agent': 'ai-cli/1.0.0 (https://github.com/openchat/ai-cli)' }
-    });
+    url = new URL(args.url);
+  } catch {
+    return { error: `Invalid URL: ${args.url}` };
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { error: 'Only http and https URLs are supported.' };
+  }
+  try {
+    const res = await fetchFollow(url, { 'User-Agent': 'vexra (+https://github.com/TobiasLogic/vexra)' });
     if (!res.ok) return { error: `HTTP ${res.status}: ${res.statusText}` };
-    const text = await res.text();
-    return { content: truncateOutput(text) };
+    const contentType = res.headers.get('content-type') || '';
+    const raw = await res.text();
+    if (/html|xml/.test(contentType)) {
+      try {
+        const { load } = await import('cheerio');
+        const $ = load(raw);
+        $('script, style, noscript, svg, head').remove();
+        const text = $('body').length ? $('body').text() : $.root().text();
+        const cleaned = text.replace(/[ \t]+/g, ' ').replace(/\n\s*\n\s*\n+/g, '\n\n').trim();
+        return { content: truncateOutput(cleaned) };
+      } catch {
+        return { content: truncateOutput(raw) };
+      }
+    }
+    return { content: truncateOutput(raw) };
   } catch (err) {
     return { error: `Fetch failed: ${err.message}` };
   }
@@ -512,14 +580,27 @@ async function execGitDiff(args) {
 }
 
 async function execGrepSearch(args) {
-  try {
-    const dir = resolvePath(args.path || '.');
-    const cmd = `rg -n "${args.pattern}" "${dir}" 2>/dev/null || git grep -n "${args.pattern}" 2>/dev/null || grep -rn "${args.pattern}" "${dir}"`;
-    const result = await runCommand(cmd);
-    return { output: truncateOutput(result.stdout || '(no matches found)') };
-  } catch (err) {
-    return { error: `grep failed: ${err.message}` };
+  const pattern = args.pattern;
+  if (typeof pattern !== 'string' || pattern === '') {
+    return { error: 'pattern is required' };
   }
+  const dir = resolvePath(args.path || '.');
+  const attempts = [
+    ['rg', ['-n', '--', pattern, dir]],
+    ['git', ['grep', '-n', '-I', '-e', pattern]],
+    ['grep', ['-rn', '--', pattern, dir]],
+  ];
+  for (const [file, argv] of attempts) {
+    try {
+      const result = await runCommandArgs(file, argv);
+      if (result.exitCode === 0) {
+        return { output: truncateOutput(result.stdout || '(no matches found)') };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return { output: '(no matches found)' };
 }
 
 const EXECUTORS = {

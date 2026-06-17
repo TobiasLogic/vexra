@@ -306,8 +306,12 @@ async function pruneHistory(messages, opts) {
   if (messages.length <= MAX_HISTORY_MESSAGES) return;
 
   const sysMsg = messages[0];
-  const evicted = messages.slice(1, CHUNK_SIZE + 1);
-  const kept = messages.slice(CHUNK_SIZE + 1);
+  let splitIdx = CHUNK_SIZE + 1;
+  while (splitIdx < messages.length && messages[splitIdx].role === 'tool') {
+    splitIdx++;
+  }
+  const evicted = messages.slice(1, splitIdx);
+  const kept = messages.slice(splitIdx);
 
   process.stderr.write(chalk.dim(`\n[ai-cli] History reached limit. Summarizing ${evicted.length} oldest messages in background...\n`));
 
@@ -622,7 +626,10 @@ export async function start(userOpts = {}) {
 
   sessionStartTime = Date.now();
 
+  let isStreaming = false;
+
   process.on('SIGINT', async () => {
+    if (isStreaming) return;
     printSessionStats();
     cleanupMcpServers();
     process.stdout.write('\x1b[?25h');
@@ -762,6 +769,7 @@ export async function start(userOpts = {}) {
       controller.abort();
     }
     process.once('SIGINT', onSigint);
+    isStreaming = true;
 
     try {
       for await (const chunk of streamChat(messages, streamOpts)) {
@@ -813,6 +821,7 @@ export async function start(userOpts = {}) {
     } finally {
       spinner.stop();
       process.removeListener('SIGINT', onSigint);
+      isStreaming = false;
     }
 
     if (turnUsage) {
