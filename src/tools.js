@@ -287,6 +287,9 @@ async function execReadFile(args) {
 
 async function execWriteFile(args) {
   const fullPath = resolvePath(args.path);
+  if (!isInsideCwd(fullPath)) {
+    return { error: `Refusing to write outside the project directory: ${args.path}. Use run_shell if you really need this.` };
+  }
   try {
     writeFileSync(fullPath, args.content, 'utf-8');
     invalidateCodeMap();
@@ -300,6 +303,9 @@ async function execWriteFile(args) {
 
 async function execEditFile(args) {
   const fullPath = resolvePath(args.path);
+  if (!isInsideCwd(fullPath)) {
+    return { error: `Refusing to write outside the project directory: ${args.path}. Use run_shell if you really need this.` };
+  }
   if (!existsSync(fullPath)) return { error: `File not found: ${args.path}` };
   try {
     const lines = readFileSync(fullPath, 'utf-8').split('\n');
@@ -323,10 +329,13 @@ async function execEditFile(args) {
 
 async function execMultiEditFile(args) {
   const fullPath = resolvePath(args.path);
+  if (!isInsideCwd(fullPath)) {
+    return { error: `Refusing to write outside the project directory: ${args.path}. Use run_shell if you really need this.` };
+  }
   if (!existsSync(fullPath)) return { error: `File not found: ${args.path}` };
   try {
     const lines = readFileSync(fullPath, 'utf-8').split('\n');
-    
+
     // Sort edits in descending order of start_line to avoid index shifting issues
     const sortedEdits = [...args.edits].sort((a, b) => b.start_line - a.start_line);
     
