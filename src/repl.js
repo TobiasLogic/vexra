@@ -936,6 +936,7 @@ export async function start(userOpts = {}) {
     const modes = ['build', 'architect', 'ask'];
     const inputPrompt = new TextPrompt({
       render() {
+        if (this.value === undefined) this.value = '';
         const indicatorColor = currentMode === 'architect' ? '#FF5555' : currentMode === 'ask' ? '#5555FF' : '#36D0D0';
         const indicator = chalk.bold.hex(indicatorColor)(`[${currentMode.toUpperCase()}]`);
         const prefix = chalk.hex('#48E080')('◆');
@@ -948,7 +949,7 @@ export async function start(userOpts = {}) {
       if (key === 'tab') {
         const idx = modes.indexOf(currentMode);
         currentMode = modes[(idx + 1) % modes.length];
-        inputPrompt.value = typeof inputPrompt.value === 'string' ? inputPrompt.value : ''; // trigger render
+        // Note: setting value doesn't automatically trigger render. Clack renders automatically after keypress.
       }
     });
 
