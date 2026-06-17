@@ -874,6 +874,7 @@ export async function start(userOpts = {}) {
       return 'continue';
     }
 
+    let executedSh = false;
     for (const cmd of extractShBlocks(fullResponse)) {
       const ok = await confirmRun(cmd, { alwaysAsk: true });
       if (!ok) {
@@ -881,10 +882,13 @@ export async function start(userOpts = {}) {
         continue;
       }
       await runShell(cmd, { fromUser: false });
+      executedSh = true;
     }
 
     await pruneHistory(messages, opts);
     saveHistory(messages);
+
+    if (executedSh) return 'continue';
   }
 
   async function agentLoop({ truncateOnError, maxLoops = MAX_AGENT_LOOPS }) {
@@ -931,7 +935,7 @@ export async function start(userOpts = {}) {
       if (key === 'tab') {
         const idx = modes.indexOf(currentMode);
         currentMode = modes[(idx + 1) % modes.length];
-        inputPrompt.value = inputPrompt.value; // trigger render
+        inputPrompt.value = typeof inputPrompt.value === 'string' ? inputPrompt.value : ''; // trigger render
       }
     });
 
@@ -1172,22 +1176,22 @@ export async function start(userOpts = {}) {
             const content = readFileSync(tmpFile, 'utf-8').trim();
             if (content) {
               console.log(chalk.dim(`  Got ${content.length} chars from editor.`));
-    lastUserPromptIdx = messages.length;
-    sessionMessageCount++;
-    const { text: cleanText, context, images } = resolveMentions(trimmed);
-    
-    let messageContent;
-    if (images && images.length > 0) {
-      messageContent = [
-        { type: 'text', text: cleanText + context },
-        ...images
-      ];
-    } else {
-      messageContent = cleanText + context;
-    }
-    
-    messages.push({ role: 'user', content: messageContent });
-    await agentLoop({ truncateOnError: lastUserPromptIdx });
+              lastUserPromptIdx = messages.length;
+              sessionMessageCount++;
+              const { text: cleanText, context, images } = resolveMentions(content);
+              
+              let messageContent;
+              if (images && images.length > 0) {
+                messageContent = [
+                  { type: 'text', text: cleanText + context },
+                  ...images
+                ];
+              } else {
+                messageContent = cleanText + context;
+              }
+              
+              messages.push({ role: 'user', content: messageContent });
+              await agentLoop({ truncateOnError: lastUserPromptIdx });
             } else {
               p.log.warn('Editor returned empty content.');
             }
