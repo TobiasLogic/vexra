@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 
 const DANGEROUS_PATTERNS = [
   { re: /\brm\b(?=[^|;&\n]*\s-[a-z]*r)(?=[^|;&\n]*\s-[a-z]*f)/i, msg: 'recursive force delete (rm -r -f)' },
@@ -62,4 +62,50 @@ export function runCommand(cmd, opts = {}) {
       });
     });
   });
+}
+
+export const BACKGROUND_TASKS = new Map();
+let nextTaskId = 1;
+
+export function spawnBackgroundTask(cmd, opts = {}) {
+  const id = `task-${nextTaskId++}`;
+  const child = spawn(cmd, {
+    shell: true,
+    cwd: opts.cwd || process.cwd(),
+    env: sanitizedEnv(),
+  });
+
+  const task = {
+    id,
+    cmd,
+    pid: child.pid,
+    startTime: new Date(),
+    status: 'running',
+    exitCode: null,
+    stdout: '',
+    stderr: '',
+    child,
+  };
+
+  child.stdout.on('data', (chunk) => {
+    task.stdout += chunk.toString();
+    if (task.stdout.length > 50000) task.stdout = task.stdout.slice(-50000);
+  });
+  child.stderr.on('data', (chunk) => {
+    task.stderr += chunk.toString();
+    if (task.stderr.length > 50000) task.stderr = task.stderr.slice(-50000);
+  });
+
+  child.on('close', (code) => {
+    task.status = 'finished';
+    task.exitCode = code;
+  });
+  
+  child.on('error', (err) => {
+    task.status = 'error';
+    task.stderr += `\n[Error spawning task]: ${err.message}`;
+  });
+
+  BACKGROUND_TASKS.set(id, task);
+  return id;
 }

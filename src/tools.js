@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { resolve, relative, join } from 'path';
-import { runCommand } from './executor.js';
+import { runCommand, spawnBackgroundTask, BACKGROUND_TASKS } from './executor.js';
 import * as cheerio from 'cheerio';
 
 const MAX_READ_SIZE = 100 * 1024;
@@ -105,6 +105,49 @@ export const TOOL_DEFINITIONS = [
           command: { type: 'string', description: 'The shell command to execute' },
         },
         required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'spawn_background_task',
+      description: 'Spawn a background shell task. Returns a task ID to interact with it later.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'The shell command to execute in the background' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'manage_task',
+      description: 'Manage background tasks. Actions: list, status, kill.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'status', 'kill'], description: 'The action to perform' },
+          task_id: { type: 'string', description: 'Task ID (required for status or kill)' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'invoke_subagent',
+      description: 'Invokes a subagent (an autonomous copy of the AI) to work on a task in the background. Returns a conversation ID that you can track via manage_task.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'A clear, actionable task description for the subagent.' },
+        },
+        required: ['prompt'],
       },
     },
   },
@@ -289,6 +332,65 @@ async function execRunShell(args) {
   }
 }
 
+async function execSpawnBackgroundTask(args) {
+  try {
+    const id = spawnBackgroundTask(args.command);
+    return { success: true, task_id: id, message: `Task started in background: ${args.command}` };
+  } catch (err) {
+    return { error: `Failed to spawn task: ${err.message}` };
+  }
+}
+
+async function execManageTask(args) {
+  if (args.action === 'list') {
+    if (BACKGROUND_TASKS.size === 0) return { output: 'No background tasks.' };
+    let out = '';
+    for (const [id, task] of BACKGROUND_TASKS.entries()) {
+      out += `[${id}] ${task.status} (pid: ${task.pid}) - ${task.cmd}\n`;
+    }
+    return { output: out.trim() };
+  }
+  
+  if (!args.task_id) return { error: `task_id is required for action '${args.action}'` };
+  const task = BACKGROUND_TASKS.get(args.task_id);
+  if (!task) return { error: `Task not found: ${args.task_id}` };
+
+  if (args.action === 'status') {
+    return {
+      task_id: task.id,
+      cmd: task.cmd,
+      status: task.status,
+      exitCode: task.exitCode,
+      stdout: truncateOutput(task.stdout, 5000),
+      stderr: truncateOutput(task.stderr, 5000),
+    };
+  }
+  
+  if (args.action === 'kill') {
+    if (task.status === 'running') {
+      task.child.kill();
+      task.status = 'killed';
+      return { success: true, message: `Sent kill signal to task ${task.id}` };
+    }
+    return { error: `Task ${task.id} is already ${task.status}` };
+  }
+  
+  return { error: `Unknown action: ${args.action}` };
+}
+
+async function execInvokeSubagent(args) {
+  try {
+    const cliPath = resolvePath('cli.js');
+    // Escape quotes properly for shell
+    const safePrompt = args.prompt.replace(/"/g, '\\"');
+    const cmd = `node "${cliPath}" --headless "${safePrompt}"`;
+    const id = spawnBackgroundTask(cmd);
+    return { success: true, conversation_id: id, message: `Subagent spawned as task ${id}. Use manage_task status to check its output.` };
+  } catch (err) {
+    return { error: `Failed to invoke subagent: ${err.message}` };
+  }
+}
+
 async function execWebFetch(args) {
   try {
     const res = await fetch(`https://r.jina.ai/${args.url}`, {
@@ -338,6 +440,9 @@ const EXECUTORS = {
   multi_edit_file: execMultiEditFile,
   list_dir: execListDir,
   run_shell: execRunShell,
+  spawn_background_task: execSpawnBackgroundTask,
+  manage_task: execManageTask,
+  invoke_subagent: execInvokeSubagent,
   web_fetch: execWebFetch,
   git_status: execGitStatus,
   git_diff: execGitDiff,
