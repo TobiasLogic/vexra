@@ -680,6 +680,19 @@ export async function start(userOpts = {}) {
       if (p.isCancel(ok)) return false;
       return ok;
     }
+    if (toolName === 'multi_edit_file') {
+      console.log(chalk.dim(`\n  Tool: `) + label + chalk.dim(` → ${args.path} (${args.edits?.length || 0} edits)`));
+      try {
+        const oldContent = readFileSync(resolve(process.cwd(), args.path), 'utf-8');
+        for (const edit of args.edits || []) {
+          const diff = diffForLineEdit(oldContent, edit.start_line, edit.end_line, edit.content);
+          console.log(diff);
+        }
+      } catch {}
+      const ok = await p.confirm({ message: 'Apply these edits?', initialValue: true });
+      if (p.isCancel(ok)) return false;
+      return ok;
+    }
     if (toolName === 'run_shell') {
       return confirmRun(args.command, { alwaysAsk: true });
     }

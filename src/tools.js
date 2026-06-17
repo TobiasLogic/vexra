@@ -56,6 +56,33 @@ export const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'multi_edit_file',
+      description: 'Edit a file by replacing multiple specific line ranges with new content. Useful for non-contiguous edits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path (relative or absolute)' },
+          edits: {
+            type: 'array',
+            description: 'List of edits to apply. Edits must be sorted in descending order of line numbers to avoid offset issues.',
+            items: {
+              type: 'object',
+              properties: {
+                start_line: { type: 'number', description: '1-indexed start line (inclusive)' },
+                end_line: { type: 'number', description: '1-indexed end line (inclusive)' },
+                content: { type: 'string', description: 'The replacement content string' }
+              },
+              required: ['start_line', 'end_line', 'content']
+            }
+          }
+        },
+        required: ['path', 'edits'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_dir',
       description: 'List the contents of a directory. Returns file and directory names with type indicators.',
       parameters: {
@@ -198,6 +225,42 @@ async function execEditFile(args) {
   }
 }
 
+async function execMultiEditFile(args) {
+  const fullPath = resolvePath(args.path);
+  if (!existsSync(fullPath)) return { error: `File not found: ${args.path}` };
+  try {
+    const lines = readFileSync(fullPath, 'utf-8').split('\n');
+    
+    // Sort edits in descending order of start_line to avoid index shifting issues
+    const sortedEdits = [...args.edits].sort((a, b) => b.start_line - a.start_line);
+    
+    let totalLinesReplaced = 0;
+    let totalLinesAdded = 0;
+
+    for (const edit of sortedEdits) {
+      const start = edit.start_line - 1;
+      const end = edit.end_line;
+      if (start < 0 || start >= lines.length || end < start) {
+        return { error: `Invalid line range: 1-indexed ${edit.start_line} to ${edit.end_line}` };
+      }
+      const newLines = edit.content.split('\n');
+      if (newLines[newLines.length - 1] === '') newLines.pop();
+      lines.splice(start, end - start, ...newLines);
+      
+      totalLinesReplaced += (end - start);
+      totalLinesAdded += newLines.length;
+    }
+
+    writeFileSync(fullPath, lines.join('\n'), 'utf-8');
+    const syntaxError = await checkSyntax(fullPath);
+    if (syntaxError) return { error: syntaxError };
+    
+    return { success: true, path: args.path, editsApplied: sortedEdits.length, linesReplaced: totalLinesReplaced, linesAdded: totalLinesAdded };
+  } catch (err) {
+    return { error: `Failed to multi-edit ${args.path}: ${err.message}` };
+  }
+}
+
 async function execListDir(args) {
   const dirPath = resolvePath(args.path || '.');
   if (!existsSync(dirPath)) return { error: `Directory not found: ${args.path || '.'}` };
@@ -272,6 +335,7 @@ const EXECUTORS = {
   read_file: execReadFile,
   write_file: execWriteFile,
   edit_file: execEditFile,
+  multi_edit_file: execMultiEditFile,
   list_dir: execListDir,
   run_shell: execRunShell,
   web_fetch: execWebFetch,
