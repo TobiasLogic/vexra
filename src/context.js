@@ -88,6 +88,8 @@ export function resolveMentions(text, cwd = process.cwd()) {
     }
   }
 
+  cleanText = cleanText.replace(/@[^\s@]+/g, '').replace(/\s{2,}/g, ' ').trim();
+
   const context = contextParts.length > 0
     ? '\n\nAttached file contents:\n\n' + contextParts.join('\n\n')
     : '';

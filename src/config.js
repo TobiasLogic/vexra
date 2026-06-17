@@ -62,6 +62,7 @@ function resolveString(envRaw, fileVal, fallback) {
 }
 
 export const config = {
+  provider: fileCfg.provider || '',
   apiKey: process.env.OPENROUTER_API_KEY || fileCfg.apiKey || '',
   baseUrl: resolveString(process.env.OPENROUTER_BASE_URL, fileCfg.baseUrl, DEFAULTS.baseUrl),
   model: resolveString(process.env.OPENROUTER_MODEL, fileCfg.model, DEFAULTS.model),

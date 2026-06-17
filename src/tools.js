@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { resolve, relative, join } from 'path';
 import { runCommand, spawnBackgroundTask, BACKGROUND_TASKS } from './executor.js';
-import * as cheerio from 'cheerio';
 
 const MAX_READ_SIZE = 100 * 1024;
 const MAX_OUTPUT_SIZE = 50 * 1024;

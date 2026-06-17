@@ -218,10 +218,9 @@ export async function* streamChat(messages, opts = {}) {
     }
   } finally {
     try { await reader.cancel(); } catch {}
+    if (parseErrorCount > 0) {
+      process.stderr.write(`\n[ai-cli: warn] ${parseErrorCount} malformed SSE chunk(s) were dropped from the response.\n`);
+    }
     reader.releaseLock();
-  }
-
-  if (parseErrorCount > 0) {
-    process.stderr.write(`\n[ai-cli: warn] ${parseErrorCount} malformed SSE chunk(s) were dropped from the response.\n`);
   }
 }

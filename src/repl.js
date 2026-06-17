@@ -33,7 +33,6 @@ let sessionTokenUsage = { prompt: 0, completion: 0, total: 0 };
 let sessionStartTime = Date.now();
 let sessionMessageCount = 0;
 let loaderStyle = 'braille';
-let loaderRunStyle = 'pulse';
 
 const LOADER_STYLES = ['braille', 'dots', 'arc', 'circle', 'square', 'line', 'grow', 'shimmer', 'pulse', 'particles', 'matrix'];
 
@@ -775,7 +774,7 @@ export async function start(userOpts = {}) {
           toolCallFragments = accumulateToolCalls(toolCallFragments, chunk.toolCalls);
           if (firstChunk) {
             spinner.stop();
-            spinner.update('Using tools');
+            if (typeof spinner.update === 'function') spinner.update('Using tools');
             spinner.start();
             firstChunk = false;
           }
@@ -946,10 +945,9 @@ export async function start(userOpts = {}) {
     });
 
     inputPrompt.on('key', (key) => {
-      if (key === 'tab') {
+      if (key === '\t') {
         const idx = modes.indexOf(currentMode);
         currentMode = modes[(idx + 1) % modes.length];
-        // Note: setting value doesn't automatically trigger render. Clack renders automatically after keypress.
       }
     });
 
@@ -1095,28 +1093,6 @@ export async function start(userOpts = {}) {
           if (isNaN(n) || n < 1) { p.log.warn('Max tokens must be a positive integer.'); break; }
           opts.maxTokens = n;
           p.log.success(`Max tokens set to ${n}`);
-          break;
-        }
-
-        case 'loader': {
-          if (!arg) {
-            p.log.info(`Loader: ${chalk.bold.hex('#36D0D0')(loaderStyle)}`);
-            console.log(chalk.dim(`  Available: ${LOADER_STYLES.join(', ')}`));
-            break;
-          }
-          const style = arg.toLowerCase();
-          if (!LOADER_STYLES.includes(style)) {
-            p.log.warn(`Unknown loader style: ${style}`);
-            console.log(chalk.dim(`  Available: ${LOADER_STYLES.join(', ')}`));
-            break;
-          }
-          loaderStyle = style;
-          p.log.success(`Loader set to ${chalk.bold.hex('#36D0D0')(style)}`);
-          const preview = createLoader('Preview', style);
-          preview.start();
-          await new Promise(r => setTimeout(r, 2000));
-          preview.stop();
-          console.log();
           break;
         }
 
