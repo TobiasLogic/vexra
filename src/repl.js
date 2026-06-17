@@ -5,9 +5,8 @@ import boxen from 'boxen';
 import { highlight } from 'cli-highlight';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join, resolve, relative } from 'path';
-import { homedir } from 'os';
 import { spawn } from 'child_process';
-import { config, validateConfig, saveConfig } from './config.js';
+import { config, validateConfig, saveConfig, CONFIG_DIR, legacyConfigMigrated } from './config.js';
 import { streamChat } from './api.js';
 import { runCommand, isDangerousCommand } from './executor.js';
 import {
@@ -25,7 +24,7 @@ import { initMcpServers, cleanupMcpServers, getMcpToolDefinitions, isMcpTool, ex
 import { generateCodeMap } from './codemap.js';
 
 const MAX_HISTORY_MESSAGES = 40;
-const HISTORY_FILE = join(homedir(), '.ai-cli', 'history.json');
+const HISTORY_FILE = join(CONFIG_DIR, 'history.json');
 const MAX_AGENT_LOOPS = 10;
 export let currentMode = 'build';
 
@@ -343,7 +342,7 @@ async function pruneHistory(messages, opts) {
 
 function saveHistory(messages) {
   try {
-    mkdirSync(join(homedir(), '.ai-cli'), { recursive: true });
+    mkdirSync(CONFIG_DIR, { recursive: true });
     writeFileSync(HISTORY_FILE, JSON.stringify(messages, null, 2), 'utf-8');
   } catch {}
 }
@@ -598,7 +597,7 @@ async function runProviderSetup(opts) {
   });
 
   if (saved) {
-    p.log.success(`Saved to ~/.ai-cli/config.json`);
+    p.log.success(`Saved to ~/.vexra/config.json`);
   } else {
     p.log.warn('Could not save config file. Settings will only apply this session.');
   }
@@ -637,6 +636,9 @@ export async function start(userOpts = {}) {
   });
 
   await printBanner(opts);
+  if (legacyConfigMigrated && !opts.headless) {
+    p.log.warn('Migrated your settings from ~/.ai-cli to ~/.vexra. The old directory was left in place and can be deleted once everything looks right.');
+  }
   await initMcpServers(p);
 
   let messages = buildInitialMessages();
@@ -1163,8 +1165,8 @@ export async function start(userOpts = {}) {
 
         case 'editor': {
           const editor = process.env.EDITOR || 'vi';
-          const tmpFile = join(homedir(), '.ai-cli', 'editor-tmp.md');
-          mkdirSync(join(homedir(), '.ai-cli'), { recursive: true });
+          const tmpFile = join(CONFIG_DIR, 'editor-tmp.md');
+          mkdirSync(CONFIG_DIR, { recursive: true });
           writeFileSync(tmpFile, '', 'utf-8');
           console.log(chalk.dim(`  Opening ${editor}...`));
           await new Promise((resolve) => {

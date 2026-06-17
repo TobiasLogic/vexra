@@ -13,11 +13,11 @@ function sleep(ms, signal) {
   });
 }
 
-function backoffMs(attempt) {
+export function backoffMs(attempt) {
   return Math.min(8000, 500 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 250);
 }
 
-function parseRetryAfter(header) {
+export function parseRetryAfter(header) {
   if (!header) return null;
   const secs = Number(header);
   if (!isNaN(secs)) return Math.min(30000, Math.max(0, secs * 1000));
@@ -26,7 +26,7 @@ function parseRetryAfter(header) {
   return null;
 }
 
-async function fetchWithRetry(url, options, { maxRetries, signal }) {
+export async function fetchWithRetry(url, options, { maxRetries, signal }) {
   let attempt = 0;
   while (true) {
     let res;

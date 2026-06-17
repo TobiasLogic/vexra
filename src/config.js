@@ -2,14 +2,28 @@ import dotenv from 'dotenv';
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, cpSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: resolve(__dirname, '..', '.env') });
 
-export const CONFIG_DIR = join(homedir(), '.ai-cli');
+export const CONFIG_DIR = join(homedir(), '.vexra');
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+
+const LEGACY_CONFIG_DIR = join(homedir(), '.ai-cli');
+
+export let legacyConfigMigrated = false;
+
+function migrateLegacyConfigDir() {
+  try {
+    if (existsSync(CONFIG_DIR) || !existsSync(LEGACY_CONFIG_DIR)) return;
+    cpSync(LEGACY_CONFIG_DIR, CONFIG_DIR, { recursive: true });
+    legacyConfigMigrated = true;
+  } catch {}
+}
+
+migrateLegacyConfigDir();
 
 const DEFAULTS = {
   baseUrl: 'https://openrouter.ai/api/v1',
