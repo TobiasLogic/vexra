@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'fs';
 import { resolve, relative, join } from 'path';
 import { runCommand, spawnBackgroundTask, BACKGROUND_TASKS } from './executor.js';
+import * as p from '@clack/prompts';
 
 const MAX_READ_SIZE = 100 * 1024;
 const MAX_OUTPUT_SIZE = 50 * 1024;
@@ -149,6 +150,47 @@ export const TOOL_DEFINITIONS = [
         required: ['prompt'],
       },
     },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'manage_workspace',
+      description: 'Manage Git worktrees to create isolated parallel branches for experimenting without breaking main files.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'list', 'remove'], description: 'Action to perform' },
+          path: { type: 'string', description: 'Relative path for the new worktree (for create) or path to remove (for remove)' },
+          branch: { type: 'string', description: 'Branch name for the new worktree (for create)' }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'ask_question',
+      description: 'Ask the user a multiple-choice question to clarify intent or get design feedback. Halts execution until the user responds in the terminal.',
+      parameters: {
+        type: 'object',
+        properties: {
+          questions: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                question: { type: 'string', description: 'The question to ask' },
+                options: { type: 'array', items: { type: 'string' }, description: 'Array of string options' },
+                is_multi_select: { type: 'boolean', description: 'If true, user can select multiple options' }
+              },
+              required: ['question', 'options']
+            }
+          }
+        },
+        required: ['questions']
+      }
+    }
   },
   {
     type: 'function',
@@ -390,6 +432,54 @@ async function execInvokeSubagent(args) {
   }
 }
 
+async function execManageWorkspace(args) {
+  try {
+    if (args.action === 'create') {
+      if (!args.path || !args.branch) return { error: 'path and branch required for create' };
+      await runCommand(`git worktree add -b ${args.branch} ${args.path}`);
+      return { success: true, message: `Created new worktree at ${args.path} on branch ${args.branch}` };
+    }
+    if (args.action === 'list') {
+      const res = await runCommand(`git worktree list`);
+      return { output: res.stdout };
+    }
+    if (args.action === 'remove') {
+      if (!args.path) return { error: 'path required for remove' };
+      await runCommand(`git worktree remove -f ${args.path}`);
+      return { success: true, message: `Removed worktree at ${args.path}` };
+    }
+  } catch (err) {
+    return { error: `Git worktree failed: ${err.message}` };
+  }
+}
+
+async function execAskQuestion(args) {
+  try {
+    const answers = [];
+    for (const q of args.questions) {
+      if (q.is_multi_select) {
+        const selected = await p.multiselect({
+          message: q.question,
+          options: q.options.map(opt => ({ value: opt, label: opt })),
+          required: false
+        });
+        if (p.isCancel(selected)) return { error: 'User cancelled the question.' };
+        answers.push({ question: q.question, answer: selected });
+      } else {
+        const selected = await p.select({
+          message: q.question,
+          options: q.options.map(opt => ({ value: opt, label: opt }))
+        });
+        if (p.isCancel(selected)) return { error: 'User cancelled the question.' };
+        answers.push({ question: q.question, answer: selected });
+      }
+    }
+    return { success: true, answers };
+  } catch (err) {
+    return { error: `Failed to ask question: ${err.message}` };
+  }
+}
+
 async function execWebFetch(args) {
   try {
     const res = await fetch(`https://r.jina.ai/${args.url}`, {
@@ -442,6 +532,8 @@ const EXECUTORS = {
   spawn_background_task: execSpawnBackgroundTask,
   manage_task: execManageTask,
   invoke_subagent: execInvokeSubagent,
+  manage_workspace: execManageWorkspace,
+  ask_question: execAskQuestion,
   web_fetch: execWebFetch,
   git_status: execGitStatus,
   git_diff: execGitDiff,
