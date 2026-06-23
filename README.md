@@ -32,9 +32,12 @@ Groq, DeepSeek, xAI, or a local Ollama.
 
 ## Features
 
-- **AST repo mapping:** parses the AST of your JS/TS files with `acorn` to build a fast index of
-  where every function and class lives, so the agent knows your layout without blindly listing
-  directories.
+- **Semantic code index:** builds a hybrid retrieval index of your repo — vector embeddings
+  (`sqlite-vec`) + BM25 keyword (FTS5) + exact-identifier search, fused with reciprocal rank
+  fusion — and folds the most relevant snippets into the model's context each turn so it locates
+  code precisely instead of blindly listing directories. Symbols are extracted with `acorn`
+  (JS/TS), it re-indexes incrementally as you edit, and it degrades gracefully: with no API key
+  (or on older Node) it falls back to keyword search.
 - **Dynamic modes:** press `Tab` while typing to cycle agent personalities.
   - `[BUILD]`: full access to write code and run commands (default).
   - `[ARCHITECT]`: high-level design and analysis; markdown proposals only.
@@ -63,9 +66,11 @@ Groq, DeepSeek, xAI, or a local Ollama.
 
 ## Requirements
 
-- **Node.js 18 or newer** (Node 20+ recommended)
+- **Node.js 18 or newer.** Semantic code indexing uses the built-in `node:sqlite` (Node 22.5+);
+  on older versions the indexer self-disables and the rest of Vexra works normally.
 - An API key from a [supported provider](#supported-providers), or a local
-  [Ollama](https://ollama.com) install (no key needed)
+  [Ollama](https://ollama.com) install (no key needed). Without one, the index falls back to
+  keyword search.
 
 ---
 
@@ -255,13 +260,44 @@ for reference.
 
 ## Configuration
 
-Vexra stores its config and history under `~/.ai-cli/`:
+Vexra stores its config and history under `~/.vexra/` (an existing `~/.ai-cli/` from older
+versions is migrated automatically on first run):
 
 | Path | Purpose |
 | --- | --- |
-| `~/.ai-cli/config.json` | Saved provider, API key, model, and defaults |
-| `~/.ai-cli/history.json` | Auto-saved conversation history |
-| `~/.ai-cli/sessions/` | Named sessions from `/session save` |
+| `~/.vexra/config.json` | Saved provider, API key, model, and defaults |
+| `~/.vexra/history.json` | Auto-saved conversation history |
+| `~/.vexra/sessions/` | Named sessions from `/session save` |
+| `~/.vexra/index/` | Semantic code index (one SQLite database per project) |
+
+### Semantic code index
+
+On startup Vexra indexes your project for semantic retrieval and keeps it fresh as you edit. It
+chunks your files, embeds them through an OpenAI-compatible `/embeddings` endpoint, and stores the
+vectors (`sqlite-vec`) next to a BM25 (FTS5) and exact-identifier index; each turn the most
+relevant snippets are folded into the model's context.
+
+Tune it with an optional `indexer` block in `~/.vexra/config.json` (every field has a default):
+
+```json
+{
+  "indexer": {
+    "enabled": true,
+    "embed_provider": "openrouter",
+    "embed_model": "openai/text-embedding-3-small",
+    "embed_dim": 768,
+    "chunk_size": 40,
+    "max_files": 2000,
+    "ignored": ["node_modules", ".git", "dist", "build"],
+    "extensions": ["js", "ts", "py", "go", "rs"]
+  }
+}
+```
+
+- **Embeddings** reuse your active provider's key and base URL by default (OpenRouter / OpenAI);
+  set `"embed_provider": "ollama"` for a local server, or `embed_base_url` for a custom endpoint.
+- **No key, no problem:** without embeddings the index falls back to BM25 + exact-identifier search.
+- **Disable** it entirely with `"enabled": false`.
 
 ### Per-project settings
 
