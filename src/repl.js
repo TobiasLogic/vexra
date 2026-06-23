@@ -22,6 +22,8 @@ import { listSessions, saveSession, loadSession, deleteSession, sessionExists } 
 import { PROVIDERS, getProvider, getProviderChoices } from './providers.js';
 import { initMcpServers, cleanupMcpServers, getMcpToolDefinitions, isMcpTool, executeMcpTool } from './mcp.js';
 import { generateCodeMap } from './codemap.js';
+import { VexraIndexer } from './indexer/index.js';
+import { setIndexer, getIndexer } from './indexer/instance.js';
 
 const MAX_HISTORY_MESSAGES = 40;
 const HISTORY_FILE = join(CONFIG_DIR, 'history.json');
@@ -460,6 +462,7 @@ function printSessionStats() {
 async function goodbye() {
   printSessionStats();
   cleanupMcpServers();
+  getIndexer()?.close();
   await fadeTransition('Goodbye.', { color: [54, 208, 208], direction: 'out' });
   process.exit(0);
 }
@@ -631,6 +634,7 @@ export async function start(userOpts = {}) {
     if (isStreaming) return;
     printSessionStats();
     cleanupMcpServers();
+    if (indexer) indexer.close();
     process.stdout.write('\x1b[?25h');
     process.exit(0);
   });
@@ -643,6 +647,30 @@ export async function start(userOpts = {}) {
 
   let messages = buildInitialMessages();
   let lastUserPromptIdx = null;
+
+  // Semantic code index: built in the background so the prompt stays responsive.
+  // Retrieval is folded into the system prompt per turn (see refreshRetrieval).
+  let indexer = null;
+  let retrievalBlock = '';
+  if (config.indexer?.enabled && !opts.headless) {
+    try {
+      indexer = new VexraIndexer({
+        root: process.cwd(),
+        log: (m) => { if (!isStreaming) p.log.message(chalk.dim(m)); },
+      }).init();
+      setIndexer(indexer);
+      indexer.startWatch();
+      indexer.index()
+        .then((stats) => {
+          if (isStreaming) return;
+          const mode = stats.vecEnabled && stats.embedded ? 'semantic' : 'keyword';
+          p.log.message(chalk.dim(`index ready · ${stats.files} files · ${stats.chunks} chunks · ${mode} search`));
+        })
+        .catch(() => {});
+    } catch {
+      indexer = null;
+    }
+  }
 
   if (resume) {
     const loaded = loadHistory();
@@ -774,7 +802,10 @@ export async function start(userOpts = {}) {
     isStreaming = true;
 
     try {
-      for await (const chunk of streamChat(messages, streamOpts)) {
+      const outgoing = retrievalBlock && messages[0]?.role === 'system'
+        ? [{ ...messages[0], content: messages[0].content + retrievalBlock }, ...messages.slice(1)]
+        : messages;
+      for await (const chunk of streamChat(outgoing, streamOpts)) {
         if (chunk._type === 'usage') {
           turnUsage = chunk;
           continue;
@@ -914,7 +945,38 @@ export async function start(userOpts = {}) {
     if (executedSh) return 'continue';
   }
 
+  function latestUserText(msgs) {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role !== 'user') continue;
+      if (typeof m.content === 'string') return m.content;
+      if (Array.isArray(m.content)) {
+        const part = m.content.find((x) => x?.type === 'text');
+        if (part) return part.text;
+      }
+    }
+    return '';
+  }
+
+  // Retrieve code relevant to the current turn once, reused across agent-loop
+  // iterations. Folded into the outgoing system message by streamAssistant.
+  async function refreshRetrieval() {
+    retrievalBlock = '';
+    if (!indexer) return;
+    const text = latestUserText(messages);
+    if (!text.trim()) return;
+    try {
+      const block = await indexer.getContextBlock(text, { limit: 6, maxChars: 6000 });
+      if (block) {
+        retrievalBlock = `\n\n### Retrieved code (semantic index)\nSnippets from the project most relevant to the latest request — use them to locate code precisely, and read full files when you need more.\n\n${block}\n`;
+      }
+    } catch {
+      retrievalBlock = '';
+    }
+  }
+
   async function agentLoop({ truncateOnError, maxLoops = MAX_AGENT_LOOPS }) {
+    await refreshRetrieval();
     for (let i = 0; i < maxLoops; i++) {
       const result = await streamAssistant({ truncateOnError });
       if (result !== 'continue') break;

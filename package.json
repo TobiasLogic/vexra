@@ -21,9 +21,11 @@
     "boxen": "^8.0.1",
     "chalk": "^5.4.1",
     "cheerio": "^1.2.0",
+    "chokidar": "^5.0.0",
     "cli-highlight": "^2.1.11",
     "commander": "^13.1.0",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
     "vitest": "^4.1.9"

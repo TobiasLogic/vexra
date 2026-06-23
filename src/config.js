@@ -34,6 +34,25 @@ const DEFAULTS = {
   title: 'vexra',
 };
 
+const INDEXER_DEFAULTS = {
+  enabled: true,
+  // Embeddings are requested over an OpenAI-compatible /embeddings endpoint.
+  // provider 'openrouter'|'openai' reuse the global apiKey + baseUrl; 'ollama'
+  // points at a local server. embed_base_url overrides the endpoint explicitly.
+  embed_provider: 'openrouter',
+  embed_base_url: '',
+  embed_model: 'openai/text-embedding-3-small',
+  embed_dim: 768,
+  embed_batch: 64,
+  chunk_size: 40,
+  chunk_overlap: 8,
+  max_files: 2000,
+  max_file_bytes: 524288,
+  db_dir: '',
+  ignored: ['node_modules', '.git', 'dist', 'build', 'coverage', '.cache', 'out', 'target', 'vendor', 'venv', '__pycache__'],
+  extensions: ['js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'py', 'php', 'rs', 'go', 'java', 'c', 'h', 'cpp', 'hpp', 'cc', 'rb', 'sh', 'json', 'yaml', 'yml', 'md'],
+};
+
 function readConfigFile() {
   try {
     const parsed = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
@@ -85,6 +104,10 @@ export const config = {
   referer: resolveString(process.env.OPENROUTER_REFERER, fileCfg.referer, DEFAULTS.referer),
   title: resolveString(process.env.OPENROUTER_TITLE, fileCfg.title, DEFAULTS.title),
   mcpServers: fileCfg.mcpServers && typeof fileCfg.mcpServers === 'object' ? fileCfg.mcpServers : {},
+  indexer: {
+    ...INDEXER_DEFAULTS,
+    ...(fileCfg.indexer && typeof fileCfg.indexer === 'object' ? fileCfg.indexer : {}),
+  },
 };
 
 export function validateConfig(opts) {

@@ -3,10 +3,19 @@ import { resolve, relative, join, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { runCommand, runCommandArgs, spawnBackgroundTask, spawnBackgroundTaskArgs, BACKGROUND_TASKS } from './executor.js';
 import { invalidateCodeMap } from './codemap.js';
+import { getIndexer } from './indexer/instance.js';
 import * as p from '@clack/prompts';
 
 const MAX_READ_SIZE = 100 * 1024;
 const MAX_OUTPUT_SIZE = 50 * 1024;
+
+// Keep the semantic index fresh after an agent edit. Fire-and-forget: indexing
+// must never block or fail a tool call. The hash check inside updateFile dedupes
+// against the file-watcher firing on the same change.
+function refreshIndex(fullPath) {
+  const indexer = getIndexer();
+  if (indexer) Promise.resolve(indexer.updateFile(fullPath)).catch(() => {});
+}
 
 export const TOOL_DEFINITIONS = [
   {
@@ -293,6 +302,7 @@ async function execWriteFile(args) {
   try {
     writeFileSync(fullPath, args.content, 'utf-8');
     invalidateCodeMap();
+    refreshIndex(fullPath);
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
     return { success: true, path: args.path, bytes: args.content.length };
@@ -319,6 +329,7 @@ async function execEditFile(args) {
     lines.splice(start, end - start, ...newLines);
     writeFileSync(fullPath, lines.join('\n'), 'utf-8');
     invalidateCodeMap();
+    refreshIndex(fullPath);
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
     return { success: true, path: args.path, linesReplaced: end - start, linesAdded: newLines.length };
@@ -358,6 +369,7 @@ async function execMultiEditFile(args) {
 
     writeFileSync(fullPath, lines.join('\n'), 'utf-8');
     invalidateCodeMap();
+    refreshIndex(fullPath);
     const syntaxError = await checkSyntax(fullPath);
     if (syntaxError) return { error: syntaxError };
 
